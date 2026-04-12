@@ -21,6 +21,9 @@ from typing import Any, List, Optional
 # importo la función para obtener el adaptador del LLM en función del provider
 from herbie_llm import get_llm
 
+# importo el recuperador de contexto de la wiki (modo Cerebro)
+from wiki_retriever import recuperar_contexto_wiki
+
 # ────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ────────────────────────────────────────────────────────────────────────────
@@ -81,6 +84,60 @@ def chat(
     history.append(response)
 
     return response.content, history
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Helper del modo Cerebro (recuperación wiki en dos fases — paradigma Karpathy)
+# ────────────────────────────────────────────────────────────────────────────
+
+def chat_cerebro(
+    llm,
+    history: List[BaseMessage],
+    user_input: str,
+    system_prompt: str,
+    wiki_path: str,
+) -> tuple[str, List[BaseMessage], dict]:
+    """
+    Modo Cerebro: antes de llamar al LLM, recupera contexto relevante de la wiki
+    usando el paradigma de dos fases de Karpathy:
+        Fase 1 — Discovery: el LLM identifica qué páginas de la wiki son relevantes.
+        Fase 2 — Answer:    se inyectan solo esas páginas como contexto.
+
+    Devuelve (respuesta_str, historial_actualizado, cerebro_meta).
+    cerebro_meta contiene métricas de la recuperación para mostrar en la UI.
+    """
+    # ── Fase 1: recuperar contexto relevante de la wiki ──────────────────────
+    wiki_result = recuperar_contexto_wiki(llm, wiki_path, user_input)
+
+    # ── Construir system prompt enriquecido con el contexto de la wiki ────────
+    contexto_wiki = wiki_result["contexto_str"]
+    system_enriquecido = (contexto_wiki + system_prompt) if contexto_wiki else system_prompt
+
+    # ── Fase 2: llamar al LLM con el contexto inyectado ──────────────────────
+    if not history:
+        history = [SystemMessage(content=system_enriquecido)]
+    else:
+        # Actualizar el SystemMessage inicial con el nuevo contexto
+        history[0] = SystemMessage(content=system_enriquecido)
+
+    history.append(HumanMessage(content=user_input))
+    response: AIMessage = llm.invoke(history)
+    history.append(response)
+
+    # ── Métricas de la llamada de respuesta ──────────────────────────────────
+    u = response.usage_metadata or {}
+    cerebro_meta = {
+        "slugs_usados":     wiki_result["slugs_usados"],
+        "tokens_discovery": wiki_result["tokens_discovery"],
+        "tokens_answer": {
+            "input":  u.get("input_tokens", 0),
+            "output": u.get("output_tokens", 0),
+            "total":  u.get("total_tokens", 0),
+        },
+        "error": wiki_result["error"],
+    }
+
+    return response.content, history, cerebro_meta
 
 
 # Pintar los pasos y la respuesta del agente
@@ -325,6 +382,8 @@ if "tokens_total" not in st.session_state:          # Tokens
     st.session_state.tokens_total = 0
 if "perplexidad" not in st.session_state:           # Perplejidad del último turno (solo Ollama)
     st.session_state.perplexidad = None
+if "cerebro_meta" not in st.session_state:          # Metadatos del último turno en modo Cerebro
+    st.session_state.cerebro_meta = None
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -353,14 +412,25 @@ with st.sidebar:
     )
 
     # Selección del modo de interacción
-    _modos_disponibles = ["chat"] if provider in PROVIDERS_SIN_TOOLS else ["chat", "agente"]
+    _modos_disponibles = ["chat"] if provider in PROVIDERS_SIN_TOOLS else ["chat", "agente", "cerebro"]
     modo = st.selectbox(
         "Modo de interacción",
         options=_modos_disponibles,
-        format_func=lambda m: {"chat": "💬 Chat", "agente": "🤖 Agente"}[m],
+        format_func=lambda m: {"chat": "💬 Chat", "agente": "🤖 Agente", "cerebro": "🧠 Cerebro (wiki)"}[m],
     )
     if provider in PROVIDERS_SIN_TOOLS:
         st.caption("⚠️ Este modelo no soporta tools — solo modo Chat disponible.")
+
+    # Ruta de la wiki (solo visible en modo Cerebro)
+    if modo == "cerebro":
+        wiki_path = st.text_input(
+            "Ruta de la wiki",
+            value="/Users/javierzazo/Library/CloudStorage/GoogleDrive-javizzdz76@gmail.com/Mi unidad/context/ProyectoCerebro/wiki",
+            help="Carpeta raíz de la wiki con index.md y archivos .md por tema.",
+        )
+        st.caption("🧠 Modo Cerebro: recupera contexto de tu wiki antes de cada respuesta (paradigma Karpathy).")
+    else:
+        wiki_path = ""
 
     llm_kwargs: dict = {}
 
@@ -447,7 +517,8 @@ with st.sidebar:
 
 st.title("🤖 Herbie")
 _PROVIDER_LABEL = {"ollama": "Ollama — llama3.2:3b", "deepseek": "Ollama — deepseek-r1:8b", "mistral": "Ollama — mistral-small3.2", "qwen3": "Ollama — Qwen3.14b-ollama", "gemma4": "Ollama — gemma4", "huggingface": "HuggingFace — Llama-3.2-3B", "gemini": "Gemini"}
-st.caption(f"Modo: **{'💬 Chat' if modo == 'chat' else '🤖 Agente'}** · Powered by **{_PROVIDER_LABEL.get(provider, provider)}** · LangChain")
+_MODO_LABEL = {"chat": "💬 Chat", "agente": "🤖 Agente", "cerebro": "🧠 Cerebro (wiki)"}
+st.caption(f"Modo: **{_MODO_LABEL.get(modo, modo)}** · Powered by **{_PROVIDER_LABEL.get(provider, provider)}** · LangChain")
 
 # ────────────────────────────────────────────────────────────────────────────
 # Frame: Historial de chat — se repinta en cada rerun desde display
@@ -463,6 +534,28 @@ for entry in st.session_state.display:  # Recorre los mensajes guardados de la c
         # Muestra las tools usadas, pasos del agente, tokens y tiempos usados
         if entry.get("agent_steps"):
             render_agent_steps(entry["agent_steps"])
+
+        # Muestra las páginas de wiki consultadas (modo cerebro — historial)
+        if entry.get("cerebro_meta"):
+            _cm = entry["cerebro_meta"]
+            slugs = _cm.get("slugs_usados", [])
+            td = _cm.get("tokens_discovery") or {}
+            ta = _cm.get("tokens_answer") or {}
+            with st.expander(f"🧠 Wiki consultada · {len(slugs)} página(s)"):
+                if _cm.get("error"):
+                    st.warning(f"Error al acceder a la wiki: {_cm['error']}")
+                if slugs:
+                    st.markdown("**Páginas cargadas:**  " + "  ·  ".join(f"`{s}`" for s in slugs))
+                else:
+                    st.caption("No se encontraron páginas relevantes — respuesta sin contexto de wiki.")
+                if td or ta:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**Tokens Fase 1 (discovery)**")
+                        st.table({"Input": [td.get("input", 0)], "Output": [td.get("output", 0)], "Total": [td.get("total", 0)]})
+                    with col2:
+                        st.markdown("**Tokens Fase 2 (respuesta)**")
+                        st.table({"Input": [ta.get("input", 0)], "Output": [ta.get("output", 0)], "Total": [ta.get("total", 0)]})
 
 # ────────────────────────────────────────────────────────────────────────────
 # Frame: Input del usuario
@@ -494,7 +587,7 @@ if user_input:
                 st.session_state.history = []
                 st.session_state.display = []
 
-                # Creo el agente
+                # Creo el agente (solo en modo agente)
                 if modo == "agente":
                     st.session_state.agent = create_agent(
                         model=st.session_state.llm,
@@ -542,6 +635,38 @@ if user_input:
 
                     # Calcular perplejidad del último mensaje (solo Ollama devuelve logprobs)
                     st.session_state.perplexidad = _calcular_perplejidad(ultimo_chat_msg)
+
+                    agent_steps = None
+                    st.session_state.cerebro_meta = None
+
+                elif modo == "cerebro":
+
+                    # Modo Cerebro: recuperación de wiki en dos fases (paradigma Karpathy)
+                    # Fase 1 → el LLM lee el índice y elige páginas relevantes
+                    # Fase 2 → se inyectan esas páginas como contexto antes de responder
+                    response, st.session_state.history, cerebro_meta = chat_cerebro(
+                        llm=st.session_state.llm,
+                        history=st.session_state.history,
+                        user_input=user_input,
+                        system_prompt=system_prompt,
+                        wiki_path=wiki_path,
+                    )
+                    st.session_state.cerebro_meta = cerebro_meta
+
+                    # Acumular tokens de la fase de respuesta
+                    ta = cerebro_meta["tokens_answer"]
+                    st.session_state.tokens_input  += ta.get("input", 0)
+                    st.session_state.tokens_output += ta.get("output", 0)
+                    st.session_state.tokens_total  += ta.get("total", 0)
+
+                    # Acumular también los tokens de discovery (Fase 1)
+                    td = cerebro_meta.get("tokens_discovery") or {}
+                    st.session_state.tokens_input  += td.get("input", 0)
+                    st.session_state.tokens_output += td.get("output", 0)
+                    st.session_state.tokens_total  += td.get("total", 0)
+
+                    # Calcular perplejidad del último mensaje del historial
+                    st.session_state.perplexidad = _calcular_perplejidad(st.session_state.history[-1])
 
                     agent_steps = None
 
@@ -604,19 +729,41 @@ if user_input:
                 st.stop()
 
 
-        # Muestra los pasos del agente
+        # Muestra los pasos del agente (modo agente)
         if agent_steps:
             render_agent_steps(agent_steps)
 
-        # Muestra la respuesta del agente
+        # Muestra las páginas de wiki consultadas (modo cerebro)
+        if modo == "cerebro" and st.session_state.cerebro_meta:
+            _cm = st.session_state.cerebro_meta
+            slugs = _cm.get("slugs_usados", [])
+            td = _cm.get("tokens_discovery") or {}
+            ta = _cm.get("tokens_answer") or {}
+            with st.expander(f"🧠 Wiki consultada · {len(slugs)} página(s)"):
+                if _cm.get("error"):
+                    st.warning(f"Error al acceder a la wiki: {_cm['error']}")
+                if slugs:
+                    st.markdown("**Páginas cargadas:**  " + "  ·  ".join(f"`{s}`" for s in slugs))
+                else:
+                    st.caption("No se encontraron páginas relevantes — respuesta sin contexto de wiki.")
+                if td or ta:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**Tokens Fase 1 (discovery)**")
+                        st.table({"Input": [td.get("input", 0)], "Output": [td.get("output", 0)], "Total": [td.get("total", 0)]})
+                    with col2:
+                        st.markdown("**Tokens Fase 2 (respuesta)**")
+                        st.table({"Input": [ta.get("input", 0)], "Output": [ta.get("output", 0)], "Total": [ta.get("total", 0)]})
+
+        # Muestra la respuesta
         st.markdown(response)
 
     # ── FASE 2: Persistencia ─────────────────────────────────────────────────
     # Guardamos ambos mensajes en display para que el historial sea correcto
     # en futuros reruns. El usuario ya ha visto todo en la Fase 1.
 
-    st.session_state.display.append({"role": "user", "content": user_input, "agent_steps": None})
-    st.session_state.display.append({"role": "assistant", "content": response, "agent_steps": agent_steps})
+    st.session_state.display.append({"role": "user", "content": user_input, "agent_steps": None, "cerebro_meta": None})
+    st.session_state.display.append({"role": "assistant", "content": response, "agent_steps": agent_steps, "cerebro_meta": st.session_state.cerebro_meta})
 
     # Rerun solo para actualizar los tokens del sidebar.
     # El chat ya es visible — el rerun no añade nada nuevo visualmente.
