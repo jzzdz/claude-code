@@ -25,7 +25,16 @@ from herbie_llm import get_llm
 from wiki_retriever import recuperar_contexto_wiki
 
 # ────────────────────────────────────────────────────────────────────────────
-# Helpers
+# region Configuración
+# ────────────────────────────────────────────────────────────────────────────
+
+# Ruta raíz de la wiki personal (modo Cerebro)
+WIKI_PATH = "/Users/javierzazo/Library/CloudStorage/GoogleDrive-javizzdz76@gmail.com/Mi unidad/context/ProyectoCerebro/wiki"
+
+# endregion
+
+# ────────────────────────────────────────────────────────────────────────────
+# region Helper cálculo métricas
 # ────────────────────────────────────────────────────────────────────────────
 
 # Calcular la perplejidad
@@ -47,11 +56,13 @@ def _calcular_perplejidad(msg) -> float | None:
     avg_logprob = sum(t["logprob"] for t in tokens) / len(tokens)
     return round(math.exp(-avg_logprob), 2)
 
+# endregion 
+
 # ────────────────────────────────────────────────────────────────────────────
-# Helper de conversación
+# region Helper del modo Chat
 # ────────────────────────────────────────────────────────────────────────────
 
-def chat(
+def _chat(
     llm,
     history: List[BaseMessage],
     user_input: str,
@@ -84,13 +95,13 @@ def chat(
     history.append(response)
 
     return response.content, history
-
+# endregion 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Helper del modo Cerebro (recuperación wiki en dos fases — paradigma Karpathy)
+# region Helper del modo Cerebro
 # ────────────────────────────────────────────────────────────────────────────
 
-def chat_cerebro(
+def _chat_cerebro(
     llm,
     history: List[BaseMessage],
     user_input: str,
@@ -106,6 +117,7 @@ def chat_cerebro(
     Devuelve (respuesta_str, historial_actualizado, cerebro_meta).
     cerebro_meta contiene métricas de la recuperación para mostrar en la UI.
     """
+    
     # ── Fase 1: recuperar contexto relevante de la wiki ──────────────────────
     wiki_result = recuperar_contexto_wiki(llm, wiki_path, user_input)
 
@@ -121,14 +133,17 @@ def chat_cerebro(
         history[0] = SystemMessage(content=system_enriquecido)
 
     history.append(HumanMessage(content=user_input))
+
+    # Envío la pregunta al LLM
     response: AIMessage = llm.invoke(history)
+    
     history.append(response)
 
     # ── Métricas de la llamada de respuesta ──────────────────────────────────
     u = response.usage_metadata or {}
     cerebro_meta = {
-        "slugs_usados":     wiki_result["slugs_usados"],
-        "tokens_discovery": wiki_result["tokens_discovery"],
+        "slugs_usados":      wiki_result["slugs_usados"],
+        "tokens_discovery":  wiki_result["tokens_discovery"],
         "tokens_answer": {
             "input":  u.get("input_tokens", 0),
             "output": u.get("output_tokens", 0),
@@ -139,10 +154,57 @@ def chat_cerebro(
 
     return response.content, history, cerebro_meta
 
+# endregion
 
-# Pintar los pasos y la respuesta del agente
+# ────────────────────────────────────────────────────────────────────────────
+# region Helper del modo Agente
+# ────────────────────────────────────────────────────────────────────────────
 
-def render_agent_steps(agent_steps: dict) -> None:
+def _chat_agente(agent, user_input: str) -> tuple[str, dict]:
+    """
+    Invoca el agente de LangChain y devuelve (respuesta_str, agent_steps).
+
+    agent_steps es un dict con:
+        - tools_usadas:          lista de tool_calls detectados en los AIMessages
+        - intermediate_messages: mensajes intermedios (sin el HumanMessage inicial ni el final)
+        - all_messages:          todos los mensajes para debug
+        - usage:                 metadatos de tokens del último mensaje
+        - timing:                response_metadata del último mensaje (tiempos Ollama)
+        - perplexidad:           perplejidad calculada a partir de logprobs (solo Ollama)
+    """
+    # Invoca al agente; result["messages"] contiene toda la traza de la conversación
+    result = agent.invoke({"messages": [HumanMessage(content=user_input)]})
+
+    # Último mensaje = respuesta final del agente
+    ultimo_msg = result["messages"][-1]
+
+    # Detectar todas las tools que el agente decidió invocar
+    tools_usadas = [
+        tc
+        for msg in result["messages"]
+        if isinstance(msg, AIMessage)
+        for tc in (msg.tool_calls or [])
+    ]
+
+    # Métricas de tokens y tiempos
+    u = ultimo_msg.usage_metadata or {}
+    perplexidad = _calcular_perplejidad(ultimo_msg)
+
+    agent_steps = {
+        "tools_usadas":          tools_usadas,
+        "intermediate_messages": result["messages"][1:-1],
+        "all_messages":          result["messages"],
+        "usage":                 u,
+        "timing":                ultimo_msg.response_metadata,
+        "perplexidad":           perplexidad,
+    }
+
+    return ultimo_msg.content, agent_steps
+
+
+    # region Pintar los pasos y la respuesta del agente
+
+def _render_agent_steps(agent_steps: dict) -> None:
     """Pinta el expander de tools + pasos a partir de los datos guardados en display."""
 
     tools_usadas = agent_steps["tools_usadas"]
@@ -205,28 +267,30 @@ def render_agent_steps(agent_steps: dict) -> None:
                 nivel = "🟢 Seguro" if p < 5 else ("🟡 Normal" if p < 20 else "🔴 Dudando")
                 st.metric("", p)
                 st.caption(nivel)
-
-# ────────────────────────────────────────────────────────────────────────────
-# Tools del agente
-# ────────────────────────────────────────────────────────────────────────────
-
-#
-#Crea funciones de langchain, internamente langchain usa function calling y convierte las funciones en algo así:
-#{
-#  "tool": "get_weather",
-#  "args": {"city": "Madrid"}
-#}
+    # endregion 
 
 
-@tool
-def contar_letras(palabra: str) -> str:
+    # ────────────────────────────────────────────────────────────────────────────
+    # region Tools del modo agente
+    # ────────────────────────────────────────────────────────────────────────────
+
+    #
+    #Crea funciones de langchain, internamente langchain usa function calling y convierte las funciones en algo así:
+    #{
+    #  "tool": "get_weather",
+    #  "args": {"city": "Madrid"}
+    #}
+
+
+@tool("contar_letras")
+def _contar_letras(palabra: str) -> str:
     """Usa esta función solamente, SIEMPRE que el usuario pregunte por número de letras sin pedir que se cuenten las letras de una palabra específica."""
     total = len(palabra.replace(" ", ""))
     detalle = ", ".join(f"'{c}': {palabra.count(c)}" for c in sorted(set(palabra)) if c != " ")
     return f"'{palabra}' tiene {total} letras. Desglose: {detalle}."
 
-@tool
-def contar_letra_en_palabra(letra: str, palabra: str) -> str:
+@tool("contar_letra_en_palabra")
+def _contar_letra_en_palabra(letra: str, palabra: str) -> str:
     """Usa esta función solamente, SIEMPRE que el usuario pregunte cuántas veces aparece una letra concreta en una palabra."""
     letra = letra.lower()
     palabra_lower = palabra.lower()
@@ -236,8 +300,8 @@ def contar_letra_en_palabra(letra: str, palabra: str) -> str:
     posiciones = [i for i, c in enumerate(palabra_lower) if c == letra]
     return f"La letra '{letra}' aparece {count} vez/veces en '{palabra}'. Posiciones: {posiciones}."
 
-@tool
-def buscar_noticias(query: str) -> str:
+@tool("buscar_noticias")
+def _buscar_noticias(query: str) -> str:
     """Busca noticias recientes sobre un tema usando el RSS público de Google News. Úsala SIEMPRE que el usuario pregunte por noticias, actualidad o eventos recientes."""
     import httpx
     import xml.etree.ElementTree as ET
@@ -257,8 +321,8 @@ def buscar_noticias(query: str) -> str:
     except Exception as e:
         return f"Error al buscar noticias sobre '{query}': {e}"
 
-@tool
-def obtener_tiempo_ciudad(ciudad: str) -> str:
+@tool("obtener_tiempo_ciudad")
+def _obtener_tiempo_ciudad(ciudad: str) -> str:
     """Obtiene el tiempo actual de una ciudad por su nombre. Úsala SIEMPRE que el usuario pregunte por el tiempo, clima o meteorología de cualquier lugar."""
     import httpx
 
@@ -296,8 +360,8 @@ def obtener_tiempo_ciudad(ciudad: str) -> str:
     except Exception as e:
         return f"Error al obtener el tiempo para '{ciudad}': {e}"
 
-@tool
-def fetch_url(url: str) -> str:
+@tool("fetch_url")
+def _fetch_url(url: str) -> str:
     """Descarga el contenido de una URL y lo devuelve en texto plano.
     Úsala SIEMPRE que el usuario pida leer, resumir o extraer información de una página web o enlace."""
     import httpx
@@ -338,25 +402,29 @@ def fetch_url(url: str) -> str:
         return f"Error al descargar '{url}': {e}"
 
 # ── Grupos de tools estáticas (disponibles siempre) ─────────────────────────
-TOOLS_TEXTO    = [contar_letras, contar_letra_en_palabra]
-TOOLS_NOTICIAS = [buscar_noticias]
-TOOLS_TIEMPO   = [obtener_tiempo_ciudad]
-TOOLS_WEB      = [fetch_url]
+TOOLS_TEXTO    = [_contar_letras, _contar_letra_en_palabra]
+TOOLS_NOTICIAS = [_buscar_noticias]
+TOOLS_TIEMPO   = [_obtener_tiempo_ciudad]
+TOOLS_WEB      = [_fetch_url]
 
 
-def get_all_tools() -> list:
+def _get_all_tools() -> list:
     """Devuelve todas las tools disponibles para el agente."""
     return TOOLS_TEXTO + TOOLS_NOTICIAS + TOOLS_TIEMPO + TOOLS_WEB
 
+    # endregion 
+# endregion 
+
 # ────────────────────────────────────────────────────────────────────────────
-# Configuración de la página
+# region Configuración de la página
 # ────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Herbie", page_icon="🤖", layout="wide")
 
+# endregion 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Estado de sesión — inicializado ANTES del sidebar
+# region Estado de sesión — inicializado ANTES del sidebar
 # ────────────────────────────────────────────────────────────────────────────
 
 if "history" not in st.session_state:               # historial de la conversación
@@ -385,9 +453,10 @@ if "perplexidad" not in st.session_state:           # Perplejidad del último tu
 if "cerebro_meta" not in st.session_state:          # Metadatos del último turno en modo Cerebro
     st.session_state.cerebro_meta = None
 
+# endregion 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Frame: Sidebar
+# region Frame: Sidebar
 # ────────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -421,16 +490,9 @@ with st.sidebar:
     if provider in PROVIDERS_SIN_TOOLS:
         st.caption("⚠️ Este modelo no soporta tools — solo modo Chat disponible.")
 
-    # Ruta de la wiki (solo visible en modo Cerebro)
+    # Información del modo Cerebro (la ruta se configura en la constante WIKI_PATH)
     if modo == "cerebro":
-        wiki_path = st.text_input(
-            "Ruta de la wiki",
-            value="/Users/javierzazo/Library/CloudStorage/GoogleDrive-javizzdz76@gmail.com/Mi unidad/context/ProyectoCerebro/wiki",
-            help="Carpeta raíz de la wiki con index.md y archivos .md por tema.",
-        )
         st.caption("🧠 Modo Cerebro: recupera contexto de tu wiki antes de cada respuesta (paradigma Karpathy).")
-    else:
-        wiki_path = ""
 
     llm_kwargs: dict = {}
 
@@ -511,8 +573,10 @@ with st.sidebar:
     st.divider()
     st.caption("Herbie usa LangChain internamente. El historial se mantiene en sesión.")
 
+# endregion 
+
 # ────────────────────────────────────────────────────────────────────────────
-# Frame: Cabecera
+# region Frame: Cabecera
 # ────────────────────────────────────────────────────────────────────────────
 
 st.title("🤖 Herbie")
@@ -520,8 +584,10 @@ _PROVIDER_LABEL = {"ollama": "Ollama — llama3.2:3b", "deepseek": "Ollama — d
 _MODO_LABEL = {"chat": "💬 Chat", "agente": "🤖 Agente", "cerebro": "🧠 Cerebro (wiki)"}
 st.caption(f"Modo: **{_MODO_LABEL.get(modo, modo)}** · Powered by **{_PROVIDER_LABEL.get(provider, provider)}** · LangChain")
 
+# endregion 
+
 # ────────────────────────────────────────────────────────────────────────────
-# Frame: Historial de chat — se repinta en cada rerun desde display
+# region Frame: Historial de chat — se repinta en cada rerun desde display
 # ────────────────────────────────────────────────────────────────────────────
 
 for entry in st.session_state.display:  # Recorre los mensajes guardados de la conversación
@@ -533,7 +599,7 @@ for entry in st.session_state.display:  # Recorre los mensajes guardados de la c
 
         # Muestra las tools usadas, pasos del agente, tokens y tiempos usados
         if entry.get("agent_steps"):
-            render_agent_steps(entry["agent_steps"])
+            _render_agent_steps(entry["agent_steps"])
 
         # Muestra las páginas de wiki consultadas (modo cerebro — historial)
         if entry.get("cerebro_meta"):
@@ -557,8 +623,10 @@ for entry in st.session_state.display:  # Recorre los mensajes guardados de la c
                         st.markdown("**Tokens Fase 2 (respuesta)**")
                         st.table({"Input": [ta.get("input", 0)], "Output": [ta.get("output", 0)], "Total": [ta.get("total", 0)]})
 
+# endregion 
+
 # ────────────────────────────────────────────────────────────────────────────
-# Frame: Input del usuario
+# region Frame: Input del usuario
 # ────────────────────────────────────────────────────────────────────────────
 
 user_input = st.chat_input("Escribe tu mensaje...")
@@ -591,7 +659,7 @@ if user_input:
                 if modo == "agente":
                     st.session_state.agent = create_agent(
                         model=st.session_state.llm,
-                        tools=get_all_tools(),
+                        tools=_get_all_tools(),
                         system_prompt=system_prompt,
                     )
                 else:
@@ -618,7 +686,7 @@ if user_input:
                 if modo == "chat":
 
                     # Llamo a mi función chat que se encarga de llamar al LLM
-                    response, st.session_state.history = chat(
+                    response, st.session_state.history = _chat(
                         llm=st.session_state.llm,
                         history=st.session_state.history,
                         user_input=user_input,
@@ -644,12 +712,13 @@ if user_input:
                     # Modo Cerebro: recuperación de wiki en dos fases (paradigma Karpathy)
                     # Fase 1 → el LLM lee el índice y elige páginas relevantes
                     # Fase 2 → se inyectan esas páginas como contexto antes de responder
-                    response, st.session_state.history, cerebro_meta = chat_cerebro(
+
+                    response, st.session_state.history, cerebro_meta = _chat_cerebro(
                         llm=st.session_state.llm,
                         history=st.session_state.history,
                         user_input=user_input,
                         system_prompt=system_prompt,
-                        wiki_path=wiki_path,
+                        wiki_path=WIKI_PATH,
                     )
                     st.session_state.cerebro_meta = cerebro_meta
 
@@ -672,57 +741,15 @@ if user_input:
 
                 else:  # Modo agente
 
-                    # Invoca al agente de langchain creado a través del interfaz de LangChain
-                    # result es un dicccionario que tiene todos los pasos dados por el agente.
-                    # cada mensaje es un objeto de tipo “mensaje” (clase base: BaseMessage) y puede ser del tipo: HumanMessage | AIMessage | ToolMessage
-                        # Ejemplo
-                        # result = {"messages": [
-                                                # HumanMessage,
-                                                # AIMessage (decide usar tool),
-                                                    # content (string) -> La respuesta del LLM
-                                                    # tool_calls (lista de diccionarios) -> identifica las tools que el LLM ha decidido usar 
-                                                    # response_metadata (diccionario) -> LLM usado, tiempos empleados...
-                                                    # additional_kwargs (diccionario)
-                                                # ToolMessage (resultado)
-                                                # ]
-
-                    result = st.session_state.agent.invoke(
-                        {"messages": [HumanMessage(content=user_input)]}
-                    )
-                    
-                    # Extraer la última respuesta del agente
-                    ultimo_msg = result["messages"][-1]
-
-                    # Detectar tools usadas
-                    tools_usadas = [
-                        tc
-                        for msg in result["messages"]       # Recorre todos los mensajes enviados y recibidos del LLM
-                        if isinstance(msg, AIMessage)       # Filtra los mensajes del tipo "Mensaje del LLM"
-                        for tc in (msg.tool_calls or [])    # 
-                    ]
+                    response, agent_steps = _chat_agente(st.session_state.agent, user_input)
 
                     # Acumular tokens usados en la llamada al LLM
-                    u = ultimo_msg.usage_metadata
-                    if u:
-                        st.session_state.tokens_input  += u.get("input_tokens", 0)
-                        st.session_state.tokens_output += u.get("output_tokens", 0)
-                        st.session_state.tokens_total  += u.get("total_tokens", 0)
+                    u = agent_steps.get("usage") or {}
+                    st.session_state.tokens_input  += u.get("input_tokens", 0)
+                    st.session_state.tokens_output += u.get("output_tokens", 0)
+                    st.session_state.tokens_total  += u.get("total_tokens", 0)
 
-                    # Calcular perplejidad del último mensaje (solo Ollama devuelve logprobs)
-                    perplexidad = _calcular_perplejidad(ultimo_msg)
-                    st.session_state.perplexidad = perplexidad
-
-                    # Guardar pasos del agente para repintarlos en el historial
-                    agent_steps = {
-                        "tools_usadas":          tools_usadas,
-                        "intermediate_messages": result["messages"][1:-1],
-                        "all_messages":          result["messages"],   # todos los mensajes para debug
-                        "usage":                 u,
-                        "timing":                ultimo_msg.response_metadata,
-                        "perplexidad":           perplexidad,
-                    }
-
-                    response = ultimo_msg.content
+                    st.session_state.perplexidad = agent_steps.get("perplexidad")
 
             except Exception as e:
                 st.error(f"Error al llamar al LLM: {e}")
@@ -731,7 +758,7 @@ if user_input:
 
         # Muestra los pasos del agente (modo agente)
         if agent_steps:
-            render_agent_steps(agent_steps)
+            _render_agent_steps(agent_steps)
 
         # Muestra las páginas de wiki consultadas (modo cerebro)
         if modo == "cerebro" and st.session_state.cerebro_meta:
@@ -768,3 +795,6 @@ if user_input:
     # Rerun solo para actualizar los tokens del sidebar.
     # El chat ya es visible — el rerun no añade nada nuevo visualmente.
     st.rerun()
+
+# endregion 
+
