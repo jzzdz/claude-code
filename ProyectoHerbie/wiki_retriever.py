@@ -23,6 +23,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 # Número máximo de páginas a cargar para no desbordar el contexto
 MAX_PAGINAS = 4
 
+# Nombre del archivo de índice de la wiki
+WIKI_INDEX = "index.md"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# prompts
+# ──────────────────────────────────────────────────────────────────────────────
+
 # Prompt para la fase de descubrimiento
 _DISCOVERY_SYSTEM = """Eres un selector de documentación. Tu única tarea es identificar qué páginas de una wiki son relevantes para responder la consulta del usuario.
 
@@ -34,20 +41,38 @@ REGLAS ESTRICTAS:
 
 Ejemplo de respuesta válida: llms-como-funcionan, redes-neuronales, ml-overview"""
 
+_DISCOVERY_USER_TEMPLATE = """# Índice de la wiki
+
+{indice}
+
+# Consulta del usuario
+
+{query}"""
+
+_CONTEXTO_WIKI_TEMPLATE = """# Contexto extraído de la wiki personal
+
+A continuación tienes información relevante de la wiki del usuario.
+Úsala como base para responder. Si la información de la wiki contradice tu conocimiento general,
+prioriza la wiki (es conocimiento específico del usuario).
+
+{paginas_texto}
+
+---
+"""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Funciones de recuperación
 # ──────────────────────────────────────────────────────────────────────────────
 
-def cargar_indice(wiki_path: str) -> str:
+def _cargar_indice(wiki_path: str) -> str:
     """Lee el archivo index.md de la wiki y devuelve su contenido."""
-    ruta = Path(wiki_path) / "index.md"
+    ruta = Path(wiki_path) / WIKI_INDEX
     if not ruta.exists():
         raise FileNotFoundError(f"No se encontró el índice en: {ruta}")
     return ruta.read_text(encoding="utf-8")
 
 
-def identificar_paginas_relevantes(
+def _identificar_paginas_relevantes(
     llm,
     indice: str,
     query: str,
@@ -60,13 +85,7 @@ def identificar_paginas_relevantes(
 
     Devuelve una lista de slugs (puede estar vacía si no hay relevancia).
     """
-    prompt = f"""# Índice de la wiki
-
-{indice}
-
-# Consulta del usuario
-
-{query}"""
+    prompt = _DISCOVERY_USER_TEMPLATE.format(indice=indice, query=query)
 
     mensajes = [
         SystemMessage(content=_DISCOVERY_SYSTEM),
@@ -97,7 +116,7 @@ def identificar_paginas_relevantes(
     return slugs, tokens_discovery
 
 
-def cargar_paginas(wiki_path: str, slugs: list[str]) -> tuple[str, list[str]]:
+def _cargar_paginas(wiki_path: str, slugs: list[str]) -> tuple[str, list[str]]:
     """
     Carga el contenido de los archivos de la wiki correspondientes a los slugs.
 
@@ -119,23 +138,14 @@ def cargar_paginas(wiki_path: str, slugs: list[str]) -> tuple[str, list[str]]:
     return texto, slugs_cargados
 
 
-def construir_contexto_wiki(paginas_texto: str) -> str:
+def _construir_contexto_wiki(paginas_texto: str) -> str:
     """
     Formatea el contexto de la wiki para inyectarlo en el system prompt.
     """
     if not paginas_texto.strip():
         return ""
 
-    return f"""# Contexto extraído de la wiki personal
-
-A continuación tienes información relevante de la wiki del usuario.
-Úsala como base para responder. Si la información de la wiki contradice tu conocimiento general,
-prioriza la wiki (es conocimiento específico del usuario).
-
-{paginas_texto}
-
----
-"""
+    return _CONTEXTO_WIKI_TEMPLATE.format(paginas_texto=paginas_texto)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -165,8 +175,8 @@ def recuperar_contexto_wiki(
 
     try:
         # Fase 1 — Cargar índice e identificar páginas relevantes
-        indice = cargar_indice(wiki_path)
-        slugs, tokens_discovery = identificar_paginas_relevantes(llm, indice, query)
+        indice = _cargar_indice(wiki_path)
+        slugs, tokens_discovery = _identificar_paginas_relevantes(llm, indice, query)
         resultado["tokens_discovery"] = tokens_discovery
 
         if not slugs:
@@ -174,11 +184,11 @@ def recuperar_contexto_wiki(
             return resultado
 
         # Fase 2 — Cargar páginas seleccionadas
-        paginas_texto, slugs_cargados = cargar_paginas(wiki_path, slugs)
+        paginas_texto, slugs_cargados = _cargar_paginas(wiki_path, slugs)
         resultado["slugs_usados"] = slugs_cargados
 
         # Construir contexto final
-        resultado["contexto_str"] = construir_contexto_wiki(paginas_texto)
+        resultado["contexto_str"] = _construir_contexto_wiki(paginas_texto)
 
     except Exception as e:
         resultado["error"] = str(e)
