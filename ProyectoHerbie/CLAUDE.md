@@ -96,6 +96,9 @@ El LLM puede ordenar:
 - `operator.add` en historial → concatena automáticamente
 - Nodos devuelven solo cambios (updates), no estado completo
 - Transiciones condicionales con funciones que devuelven nombre de nodo o END
+- **Refactor Apr-2026**: Separación en `crear_grafo_agente()` (construcción) vs `ejecutar_objetivo_langgraph()` (ejecución)
+  - Mejora reutilización y testabilidad del grafo
+  - Facilita aislar lógica de nodos de Streamlit UI
 
 ### Playwright
 - `page.goto(url, wait_until="networkidle")` → espera JS completo
@@ -119,17 +122,43 @@ El LLM puede ordenar:
 
 ## Próximas Tareas
 
+- [x] Refactorizar `_ejecutar_accion` para centralizar extracción de contenido
+- [x] Separar construcción del grafo (`crear_grafo_agente`) de su ejecución
+- [x] Crear CLAUDE.md del proyecto con documentación completa
 - [ ] Añadir tools con `@tool` que ejecuta el LLM
 - [ ] Cambiar aristas por `add_conditional_edges` (ya usado en código actual)
 - [ ] Refactor completo de responsabilidades
 - [ ] Probar Ghostty
 
-## Ritual de Commit
+## Ritual de Commit (OBLIGATORIO)
 
-**Antes de cada commit, actualizar este CLAUDE.md:**
-1. Marcar tareas completadas en "Próximas Tareas"
-2. Añadir nuevas tareas descubiertas
-3. Actualizar "Notas Técnicas" con cambios en arquitectura
-4. Commitear archivo + cambios juntos
+**ANTES DE CADA COMMIT, ACTUALIZAR ESTE CLAUDE.MD:**
 
-Esto mantiene el proyecto documentado y sincronizado con la realidad.
+### 1. Actualizar "Próximas Tareas"
+- Marcar tareas completadas con `[x]`
+- Añadir nuevas tareas descubiertas
+- Reordenar por prioridad si es necesario
+
+### 2. Actualizar "Notas Técnicas"
+- Agregar cambios de arquitectura realizados
+- Documentar decisiones técnicas importantes
+- Actualizar ejemplos de código si aplica
+
+### 3. Commitear junto
+- Incluir CLAUDE.md en el commit
+- Mensaje debe resumir: cambios de código + cambios de documentación
+
+**Ejemplo:**
+```
+Refactor: separar grafo de ejecución + actualizar docs
+
+Cambios de código:
+- crear_grafo_agente() para construcción
+- ejecutar_objetivo_langgraph() solo ejecuta
+
+Cambios de documentación:
+- Agregar Notas Técnicas sobre TypedDict
+- Marcar "Separación construcción/ejecución" como completada
+```
+
+Esto mantiene el proyecto siempre documentado y sincronizado.
