@@ -42,3 +42,11 @@ no hagas nada, solo dime como lo harías repondiendo a las siguientes preguntas:
 - Respeta en la medida de lo posible los comentarios que he puesto y sigue esa misms línea de comentarios en lo que hagas
 
 dime como lo implementarias, no lo hagas todavía
+
+
+Nuevas
+
+- en "herbie_app.py" quiero crear un tercer modo llamado "Cerebro"
+- Este cerebro se conectará a una wiki situada en "'/Users/javierzazo/Library/CloudStorage/GoogleDrive-javizzdz76@gmail.com/Mi unidad/context/ProyectoCerebro/wiki'"
+- Esta wiki está creada con este paradigma "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+- como implementarías que el herbie pueda acceder a ese contexto con el paradigma expresado por larpathy para poder reducir los tokens necesarios en su consulta?

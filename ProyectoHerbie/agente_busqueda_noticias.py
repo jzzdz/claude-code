@@ -37,24 +37,23 @@ from herbie_llm import get_llm
 
 
 # ─────────────────────────────────────────
-#  region Configuración
+#  region 1 - Configuración
 # ─────────────────────────────────────────
 
-    #################################################################################
-    # region Constantes
-    #################################################################################
+#################################################################################
+# region 1.1 - Constantes
+#################################################################################
 
 
 URLS_FILE       = os.path.join(os.path.dirname(__file__), "URLs.xlsx")
 MIN_CHARS_PARRAFO = 10    # ignorar líneas muy cortas (menús, botones, etc.)
 MAX_PASOS_AGENTE  = 10    # máximo de acciones que puede encadenar el agente
 
-    # endregion
+# endregion 1.1
 
-    #################################################################################
-    # region Prompts
-    #################################################################################
-
+#################################################################################
+# region 1.2 - Prompts
+#################################################################################
 
 # Acciones disponibles que el LLM puede ordenar a Playwright
 ACCIONES_DISPONIBLES = """
@@ -94,42 +93,20 @@ Responde ÚNICAMENTE con un JSON válido, sin markdown ni texto extra:
   "parametro": "texto del elemento a clickar, URL a navegar, o vacío si no aplica"
 }}
 """
-       # endregion
-# endregion
+# endregion 1.2
+
+# endregion 1
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# region Helpers: Genéricos
+# region 2 - Helpers para navegar y acceder al HTML
 # ────────────────────────────────────────────────────────────────────────────
 
-    #################################################################################
-    # region Acceder al HTML de una págona con playwright
-    #################################################################################
 
-def _fetch_html(url: str, page) -> str | None:
-    """Renderiza la página con Playwright y devuelve el HTML completo."""
-
-    try:
-        # Espera hasta que toda la página (javascript incluido) esté cargada
-        page.goto(url, timeout=30_000, wait_until="networkidle")
-
-        # Devuelve el contenido HTML actual del DOM de la página en ese momento, es decir, incluyendo el javascript generado
-        return page.content()
-
-    except Exception:
-        return None
-
-    # endregion
-# endregion
-
-# ────────────────────────────────────────────────────────────────────────────
-# region Helpers: Para buscar texto
-# ────────────────────────────────────────────────────────────────────────────
 
 #################################################################################
-# SECCIÓN.Helpers: Buscar texto dentro de una página web
+# region 2.1 - Buscar texto con beautifullsoup dentro de una página web
 #################################################################################
-
 
 def _buscar_texto_beautifulsoup(html: str, empresa: str, base_url: str) -> list[dict]:
     """
@@ -195,6 +172,12 @@ def _buscar_texto_beautifulsoup(html: str, empresa: str, base_url: str) -> list[
 
     return resultados
 
+# endregion 2.1
+
+#################################################################################
+# region 2.2 - Buscar texto con playwright dentro de una página web
+#################################################################################
+
 def _buscar_texto_playwright(empresa: str, base_url: str, page) -> list[dict]:
     """
     Busca el texto en la página usando Playwright y devuelve lista de:
@@ -240,16 +223,36 @@ def _buscar_texto_playwright(empresa: str, base_url: str, page) -> list[dict]:
         resultados.append({"parrafo": parrafo, "link": link})
 
     return resultados
+# endregion 2.2
 
-# endregion
+#################################################################################
+# region 2.3 - Acceder al HTML de una página con playwright
+#################################################################################
+
+def _fetch_html(url: str, page) -> str | None:
+    """Renderiza la página con Playwright y devuelve el HTML completo."""
+
+    try:
+        # Espera hasta que toda la página (javascript incluido) esté cargada
+        page.goto(url, timeout=30_000, wait_until="networkidle")
+
+        # Devuelve el contenido HTML actual del DOM de la página en ese momento, es decir, incluyendo el javascript generado
+        return page.content()
+
+    except Exception:
+        return None
+
+# endregion 2.3
+
+# endregion (2)
 
 # ────────────────────────────────────────────────────────────────────────────
-#region  Helpers "cumplir objetivo"
+# region 3 - Helpers "cumplir objetivo"
 # ────────────────────────────────────────────────────────────────────────────
 
-##################################################################################
-# SECCIÓN.Helpers: Extraer los links de una página con playwright
-##################################################################################
+    ##################################################################################
+    # region 3.1 - Definir herramienta para extraer los links de una página con playwright
+    ##################################################################################
 
 def _extraer_links_pagina(page, base_url: str) -> dict[str, str]:
     """
@@ -270,11 +273,13 @@ def _extraer_links_pagina(page, base_url: str) -> dict[str, str]:
             pass
     return links
 
-##################################################################################
-# SECCIÓN.Helpers: Definir acciones que se puede ejecutar con playwright
-##################################################################################
+    # endregion 3.1
 
-def _ejecutar_accion(accion: str, parametro: str, page) -> bool:
+    ##################################################################################
+    # region 3.2 . Definir acciones que se puede ejecutar con playwright (click, escribir...)
+    ##################################################################################
+
+def _ejecutar_accion(accion: str, parametro: str, page) -> str | bool:
     """
     Ejecuta la acción indicada por el LLM usando Playwright.
     Devuelve True si la acción se ejecutó correctamente, False si falló.
@@ -305,8 +310,10 @@ def _ejecutar_accion(accion: str, parametro: str, page) -> bool:
             page.keyboard.press("End")
             page.wait_for_timeout(1_000)
 
-        elif accion in ("extraer", "fin"):
-            # No requieren interacción con el navegador
+        elif accion == "extraer":
+            return page.inner_text("body")
+
+        elif accion == "fin":
             pass
 
         return True
@@ -314,8 +321,17 @@ def _ejecutar_accion(accion: str, parametro: str, page) -> bool:
     except Exception as e:
         return False
 
+    # endregion 3.2
+ 
+# endregion
+
 ##################################################################################
-# SECCIÓN.Helpers: Definir proceso de cumplr con el objetivo (con python y langgraph)
+# region 4 - Definir proceso
+##################################################################################
+
+
+##################################################################################
+# region 4.1 - Definir proceso con python de cumplir con el objetivo
 ##################################################################################
 
 def ejecutar_objetivo_python(page, llm, objetivo: str, url_inicial: str, st_container) -> str | None:
@@ -389,28 +405,36 @@ def ejecutar_objetivo_python(page, llm, objetivo: str, url_inicial: str, st_cont
         # Guarda la acción en el historial para evitar bucles
         historial.append(f"Paso {paso+1}: {accion}({parametro}) — {razon}")
 
-        # Si el LLM decide extraer el contenido, devuelve el texto actual de la página
-        if accion == "extraer":
-            return page.inner_text("body")
-
         # Si el LLM decide terminar sin extraer nada
         if accion == "fin":
             return None
 
-        # Ejecuta la acción en el navegador con Playwright
-        ok = _ejecutar_accion(accion, parametro, page)
-        if not ok:
+        # Ejecuta la acción (para "extraer" devuelve el texto; para el resto, bool)
+        resultado = _ejecutar_accion(accion, parametro, page)
+
+        if accion == "extraer":
+            return resultado
+
+        if resultado is False:
             st_container.warning(f"⚠️ No se pudo ejecutar: {accion}({parametro})")
 
     # Si se alcanza el máximo de pasos sin llegar a "extraer" o "fin"
     st_container.warning("⚠️ Se alcanzó el máximo de pasos sin completar el objetivo.")
     return None
 
+# endregion 4.1
+
+##################################################################################
+# region 4.2 - Definir proceso con langgraph de cumplir con el objetivo (con python y langgraph)
+##################################################################################
+
+
 
 def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_container) -> str | None:
     """
     Loop agéntico implementado con LangGraph.
-    Equivalente a ejecutar_objetivo_python pero usando un grafo de nodos con estado.
+
+    Esto es una máquina de estados implementado manualmente con un enfoque react
 
     El grafo tiene tres nodos:
       - observar  → lee la página, invoca el LLM y decide la siguiente acción
@@ -425,11 +449,11 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
     import operator
 
     ############################################################
-    # Defino el Estado del grafo 
+    # region 4.2.1 - Defino MEMORIA del grafo = el Estado del grafo 
     ############################################################
 
-        # TypedDict que define los campos que comparte el estado entre nodos.
-        # "operator.add" en historial indica que cada nodo AÑADE entradas en vez de reemplazarlas.
+    # TypedDict que define los campos que comparte el estado entre nodos.
+    # "operator.add" en historial indica que cada nodo AÑADE entradas en vez de reemplazarlas.
 
     class Estado(TypedDict):
         objetivo:     str               # objetivo en lenguaje natural (inmutable)
@@ -440,16 +464,35 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
         resultado:    str | None        # texto extraído al final (None si no hay)
         pasos:        int               # contador de pasos para evitar bucles
 
+    # endregion 4.2.1
+
     ############################################################
-    # Defino los nodos
+    # region 4.2.2 - Defino los nodos
     ############################################################
-    
-    # Defino Nodo "observar" 
+
+    """ Un nodo es un función que recibe un estado y devuelve cambios en el estado """
+    """ En LangGraph los nodos NO devuelven el estado completo """
+    """ solo los cambios (updates) del estado """
+
+    # region 4.2.2.1 - Defino Nodo el CEREBRO "observar" 
+        
         # Lee el estado actual de la página, construye el prompt, invoca el LLM
         # y actualiza el estado con la acción decidida.
 
     def nodo_observar(estado: Estado) -> dict:
-        """Lee la página, llama al LLM y devuelve la acción a ejecutar."""
+        """
+        Lee la página, llama al LLM y devuelve la acción a ejecutar
+
+        Recibe el estado actual y devuelve : 
+            - Acción: "click" | "navegar" | "scroll" | "extraer" | "fin"....
+            - Parámetro: "texto del elemento a clickar, URL a navegar, o vacío si no aplica"
+            - Razonamiento: explicación de lo que ha hecho
+            - Pasos: número de paso
+        """
+
+        ###############################################################
+        # Construye el prompt con el estado actual de la página
+        ###############################################################
 
         # Obtiene la URL actual del navegador
         url_actual = page.url
@@ -463,7 +506,7 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
             f"  - {texto} → {url}" for texto, url in list(links.items())[:30]
         )
 
-        # Construye el prompt con el estado actual de la página
+        # Crea la variable prompt
         prompt = _PROMPT_AGENTE.format(
             objetivo   = estado["objetivo"],
             url_actual = url_actual,
@@ -473,10 +516,18 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
             acciones   = ACCIONES_DISPONIBLES,
         )
 
+        ###############################################################
         # Invoca el LLM
+        ###############################################################
+
         respuesta = llm.invoke([HumanMessage(content=prompt)])
 
+        ###############################################################
         # Parsea el JSON de la respuesta
+        ###############################################################
+
+        # Accede al contenido
+
         try:
             contenido = re.sub(r"```json|```", "", respuesta.content).strip()
             decision  = json.loads(contenido)
@@ -485,16 +536,25 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
             st_container.warning(f"⚠️ El LLM no devolvió JSON válido: {respuesta.content[:200]}")
             decision = {"accion": "fin", "parametro": "", "razonamiento": "JSON inválido"}
 
+        # Estrae la acción, parámetro y razón devuelto por el LLM
+
         accion     = decision.get("accion", "fin")
         parametro  = decision.get("parametro", "")
         razon      = decision.get("razonamiento", "")
+
+        ###############################################################
+        # Muestra pasos realizados
+        ###############################################################
 
         # Muestra el paso y el razonamiento del LLM en Streamlit
         st_container.write(f"🤖 Paso {estado['pasos'] + 1}/{MAX_PASOS_AGENTE}...")
         st_container.write(f"💭 {razon}")
         st_container.write(f"▶️ Acción: **{accion}** — `{parametro}`")
 
+        ###############################################################
         # Devuelve los campos del estado que este nodo actualiza
+        ###############################################################
+
         return {
             "accion":       accion,
             "parametro":    parametro,
@@ -502,30 +562,37 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
             "pasos":        estado["pasos"] + 1,
         }
 
-    #  Definir Nodo "ejecutar" 
+    # endregion 4.2.2.1
+
+    #  region 4.2.2.2 - Defino HERRAMIENTAS = Nodo "ejecutar"  (ejecuta acciones)
         # Ejecuta en Playwright la acción decidida por el LLM y actualiza el historial.
 
     def nodo_ejecutar(estado: Estado) -> dict:
-        """Ejecuta la acción en Playwright y actualiza el historial."""
+        """Ejecuta la acción decidida por el nodo observar y actualiza el historial."""
+        """Recibe el estado actual, ejecuta la acción y devuelve : historial"""
 
         accion    = estado["accion"]
         parametro = estado["parametro"]
 
-        # Si la acción es "extraer", captura el texto de la página como resultado final
-        if accion == "extraer":
-            return {"resultado": page.inner_text("body")}
+        # Ejecuta la acción (para "extraer" devuelve el texto; para el resto, bool)
+        resultado = _ejecutar_accion(accion, parametro, page)
 
-        # Para el resto de acciones, ejecuta con Playwright
-        ok = _ejecutar_accion(accion, parametro, page)
-        if not ok:
+        if accion == "extraer":
+            return {"resultado": resultado}
+
+        if resultado is False:
             st_container.warning(f"⚠️ No se pudo ejecutar: {accion}({parametro})")
 
         # Añade la acción al historial (operator.add la concatena automáticamente)
         entrada_historial = f"Paso {estado['pasos']}: {accion}({parametro}) — {estado['razonamiento']}"
         return {"historial": [entrada_historial]}
 
+    # endregion 4.2.2.2
+
+    # endregion 4.2.2
+
     ############################################################
-    # Defino las transiciones
+    # region 4.2.3 - Defino las transiciones
     ############################################################
 
     # ── Función de enrutamiento (arista condicional) ──────────────────────────
@@ -546,8 +613,10 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
         # Si no → volver a observar la página
         return "observar"
 
+    # endregion 4.2.3
+
     ############################################################
-    # Construcción del grafo
+    # region 4.2.4 Construcción del grafo
     ############################################################
 
     # Creo el objeto que representa un nodo en ejecución
@@ -569,8 +638,10 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
     # Compila el grafo en un objeto ejecutable (Runnable de LangChain)
     app_grafo = grafo.compile()
 
+    # endregion 4.2.4
+
     ############################################################
-    #  Ejecución del grafo 
+    #  region 4.2.5 - Ejecución del grafo 
     ############################################################
 
     # Defino el Estado inicial con el objetivo y contadores a cero
@@ -590,10 +661,14 @@ def ejecutar_objetivo_langgraph(page, llm, objetivo: str, url_inicial: str, st_c
     # Devuelve el texto extraído o None si no se completó el objetivo
     return estado_final.get("resultado")
 
-# endregion
+    # endregion 4.2.5
+
+# endregion 4.2
+
+# endregion 4
 
 # ────────────────────────────────────────────────────────────────────────────
-# region UI — Streamlit
+# region 5- UI Streamlit
 # ────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Agente Noticias", page_icon="📰", layout="wide")
@@ -854,4 +929,4 @@ if buscar and listo and urls:
             st.text_area("Contenido extraído", texto_extraido, height=400)
             st.divider()
 
-# endregion
+# endregion 5

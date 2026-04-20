@@ -22,7 +22,7 @@ import torch
 from typing import Any
 
 ##########################################################################################
-# Funciones generales
+# region Funciones generales
 ##########################################################################################
 
 
@@ -33,15 +33,17 @@ def _detect_device() -> str:
         return "cuda"
     return "cpu"
 
+# endregion
+
 ##########################################################################################
-# Funciones para acceder a los LLMs
+# region Funciones para acceder a los LLMs
 ##########################################################################################
 
 # Funciones que devuelven adaptadores para los difernentes providers
 
-# ────────────────────────────────────────────────────────────────────────────
-# Crear adaptader para usar modelos HuggingFace (carga en memoria)
-# ────────────────────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
+    # region Crear adaptader para usar modelos HuggingFace (carga en memoria)
+    # ────────────────────────────────────────────────────────────────────────────
 
 _hf_cache: dict = {}
 
@@ -89,9 +91,9 @@ def _get_huggingface_llm(model_id: str = "meta-llama/Llama-3.2-3B-Instruct"):
     _hf_cache[model_id] = chat_model
 
     return chat_model
-
+    # endregion
 # ────────────────────────────────────────────────────────────────────────────
-# Crear adaptader para usar modelos HuggingFace desde ollama (carga en memoria)
+# region Crear adaptader para usar modelos ollama (carga en memoria)
 # ────────────────────────────────────────────────────────────────────────────
 
 def _get_ollama_llm(model: str = "llama3.2:3b"):
@@ -127,20 +129,21 @@ def _get_ollama_llm(model: str = "llama3.2:3b"):
             return params
 
     return ChatOllamaWithLogprobs(model=model, temperature=0.7)
-    
-# ────────────────────────────────────────────────────────────────────────────
-# Crear adaptador para usar modelos Gemini (no carga en memoria, uso vía API)
-# ────────────────────────────────────────────────────────────────────────────
+    # endregion
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # region Crear adaptador para usar modelos Gemini (no carga en memoria, uso vía API)
+    # ────────────────────────────────────────────────────────────────────────────
 
 def _get_gemini_llm(api_key: str, model: str = "gemini-2.0-flash"):
 
     """Devuelve un ChatGoogleGenerativeAI listo para usar con LangChain."""
     from langchain_google_genai import ChatGoogleGenerativeAI
     return ChatGoogleGenerativeAI(model=model, google_api_key=api_key)
-
+    # endregion
 
 # ────────────────────────────────────────────────────────────────────────────
-# Devover el adaptador de langchain creado en función del provider
+# region Devover el adaptador de langchain creado en función del provider
 # ────────────────────────────────────────────────────────────────────────────
 
 def get_llm(provider: str, **kwargs):
@@ -173,4 +176,5 @@ def get_llm(provider: str, **kwargs):
     raise ValueError(f"Provider desconocido: '{provider}'. Usa ollama, huggingface o gemini.")
 
 
-
+# endregion
+# endregion
