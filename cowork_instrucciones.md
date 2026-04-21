@@ -50,3 +50,12 @@ Nuevas
 - Este cerebro se conectará a una wiki situada en "'/Users/javierzazo/Library/CloudStorage/GoogleDrive-javizzdz76@gmail.com/Mi unidad/context/ProyectoCerebro/wiki'"
 - Esta wiki está creada con este paradigma "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
 - como implementarías que el herbie pueda acceder a ese contexto con el paradigma expresado por larpathy para poder reducir los tokens necesarios en su consulta?
+
+
+Aquí tienes el contenido pasado a bullet points:
+
+Chat conversacional
+Que disponga de herramientas:
+De consultar el tiempo (que será una conexión a un MCP) → de forma determinista
+De buscar noticias en internet (que será un MCP que buscará en las webs proporcionadas en un Excel cargado al inicio). Detrás del MCP habrá una función con BeautifulSoup y Playwright
+De cumplir un objetivo navegando en internet
