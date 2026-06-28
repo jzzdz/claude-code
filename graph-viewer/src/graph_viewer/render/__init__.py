@@ -1,2 +1,0 @@
-"""Plotly render preparation helpers."""
-
