@@ -1,0 +1,14 @@
+{
+  "claude": {
+    "default": "claude-sonnet-4-6",
+    "agents": {
+      "leader": "claude-opus-4-7"
+    }
+  },
+  "codex": {
+    "default": "gpt-5.4",
+    "agents": {
+      "leader": "gpt-5.5"
+    }
+  }
+}

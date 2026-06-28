@@ -99,7 +99,7 @@ RAG de dos fases sobre archivos `.md` locales (paradigma LLM Wiki de Karpathy):
 
 ### Migración de directorio (Apr-2026)
 - El proyecto fue migrado de `ProyectoHerbie/` a `ProyectoHerbie_test/` para permitir iteración experimental
-- El directorio padre (`context/claude-code/`) es el repositorio git raíz
+- El directorio padre (`context/Repos/`) es el repositorio git raíz
 - Nuevos archivos en el padre: `.agents/` (definiciones de agentes), `.claude/` (config Claude Code), `skills-lock.json`, `llm-council-master/`
 
 ### LangGraph

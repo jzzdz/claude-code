@@ -1,0 +1,36 @@
+{
+  "project": "{{project_name}}",
+  "template_id": "{{template_id}}",
+  "rules": {
+    "one_feature_at_a_time": true,
+    "require_review_to_done": true,
+    "require_tests_to_close": true,
+    "valid_status": [
+      "pending",
+      "in_progress",
+      "done",
+      "blocked"
+    ]
+  },
+  "features": [
+    {
+      "id": "F000",
+      "epic": "BOOTSTRAP",
+      "name": "Bootstrap inicial del repo",
+      "status": "done",
+      "description": "Crear el esqueleto inicial del repo desde la template {{template_id}}.",
+      "acceptance": [
+        "Se ha seleccionado la template correcta.",
+        "La estructura generada coincide con la template seleccionada.",
+        "Se cumplen todos los required_files definidos en template_manifest.json.",
+        "Se cumplen todos los required_directories definidos en template_manifest.json.",
+        "Todos los placeholders han sido sustituidos correctamente.",
+        "No quedan placeholders sin resolver.",
+        "feature_list.json queda inicializado.",
+        "progress/ queda inicializado.",
+        "./init.sh existe, es ejecutable y termina en verde.",
+        "Existe al menos un test smoke y pasa correctamente."
+      ]
+    }
+  ]
+}
